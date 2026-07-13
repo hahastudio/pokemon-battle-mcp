@@ -1,0 +1,38 @@
+{
+  "name": "pokemon-battle-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Pokémon Champions SP-based battle calculations and optimization.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "pokemon-battle-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "pretest": "npm run typecheck && npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@pkmn/data": "^0.10.11",
+    "@pkmn/dex": "^0.10.11",
+    "@smogon/calc": "^0.11.0",
+    "axios": "^1.18.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

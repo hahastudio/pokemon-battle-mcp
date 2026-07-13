@@ -1,95 +1,182 @@
-# Pokémon Battle Helper MCP Server - Architecture Design (Pokémon Champions Edition)
+# Pokémon Battle Helper MCP Server - Architecture Design
 
-This Model Context Protocol (MCP) server provides a set of tools to assist competitive Pokémon VGC players under the **Pokémon Champions (宝可梦冠军赛)** ruleset. It helps in team building, speed tier analysis, and damage calculation optimization by using the game's unique **Ability Points (能力点数 / SP)** system.
+This repository implements a TypeScript **Model Context Protocol (MCP)** server for Pokémon Champions battle assistance. It exposes tools for current M-rule metagame lookup, Pokémon option lookup, Champions SP stat calculation, damage checks, speed-tier analysis, and inverse SP optimization.
+
+This document is the canonical project architecture. `README.md` should remain a short usage guide and should not duplicate implementation details that belong here.
 
 ---
 
 ## 1. System Overview
 
-The server acts as an intermediary between LLMs (like Claude, ChatGPT) and Pokémon competitive database & simulation libraries. It translates high-level tactical questions into programmatic iterations and damage formulas.
-
-```
+```txt
 +-------------------------------------------------------------+
-|                        LLM / Client                         |
+|                         MCP Client                          |
+|              Claude / ChatGPT / Codex / custom app          |
 +-------------------------------------------------------------+
-                              | (MCP Protocol)
+                              | MCP over stdio
                               v
 +-------------------------------------------------------------+
-|                      Pokémon MCP Server                     |
+|                    Pokémon Battle MCP Server                |
 +-------------------------------------------------------------+
       |                       |                       |
       v                       v                       v
 +-----------+           +-----------+           +-----------+
-|   Meta    |           | Calc      |           | Inverse   |
-|   Data    |           | Engine    |           |  Module   |
-|  Module   |           | (Showdown)|           |  (Solver) |
+| Live Meta |           | Calc      |           | Inverse   |
+| Source    |           | Engine    |           | Solver    |
 +-----------+           +-----------+           +-----------+
       |                       |                       |
       v                       v                       v
-[poch.ms/Pikalytics]    [@pkmn/dmg / calc]      [SP Optimization]
+ Pikalytics live       @smogon/calc             SP search
+ doubles by default    + Champions SP rules      over 0..32
 ```
 
-### 1.1 Pokémon Champions Ruleset Adaptations
-Under the Pokémon Champions ruleset (`poch.ms`), stats calculation is modernized and simplified:
-- **Level**: Fixed at **50** for all Pokémon.
-- **IVs (个体值)**: Fixed at **31** (perfect) in all stats.
-- **Ability Points (能力点数 / SP / AP)**: Replaces traditional Effort Values (EVs).
-  - Each stat can be allocated **0 to 32 SP**.
-  - A Pokémon can have a maximum of **66 SP** in total across all 6 stats.
-  - **Conversion Formula**: `1 SP = 8 EVs` in the standard Showdown calculator.
-  - Since `EV = 8 * SP`, standard formulas perfectly hold:
-    - `Stat = floor(Base + 20.5 + SP) * Nature` (for non-HP stats)
-    - `HP = floor(Base + 75.5 + SP)` (for HP)
+### 1.1 Pokémon Champions stat model
+
+The server uses the Pokémon Champions stat model throughout:
+
+- **Level**: fixed at `50`.
+- **IVs**: fixed at `31` in all stats.
+- **SP / Ability Points**:
+  - each stat: integer `0..32`;
+  - total per Pokémon: at most `66`;
+  - calculator conversion: `1 SP = 8 EVs`.
+
+Therefore the standard level-50 Pokémon formula matches the simplified Champions formula:
+
+```txt
+HP       = floor(Base + 75.5 + SP)
+Non-HP   = floor(Base + 20.5 + SP) * Nature
+```
 
 ---
 
-## 2. Core Modules
+## 2. Technology Stack
 
-### 2.1 Meta Data Module
-Responsible for retrieving up-to-date competitive metagame statistics.
-- **Data Sources**:
-  - **poch.ms / Pikalytics API**: Fetching popular builds, movesets, items, abilities, and popular SP spreads.
-- **Key Functions**:
-  - `getPopularBuilds(pokemon: string)`: Returns top movesets, common SP spreads (e.g., `32/0/0/32/0/2`), items, and abilities.
-  - `getMetaPokemonList()`: Returns top-tier Pokémon in the current meta.
-
-### 2.2 Calculation Engine (Wrapper)
-Wraps standard Pokémon Showdown libraries to calculate exact in-battle stats and damage ranges.
-- **Dependencies**:
-  - `@pkmn/data` (for Pokémon, moves, items, abilities data)
-  - `@pkmn/dmg` (damage calculation math)
-- **Key Functions**:
-  - `calculateStats(pokemon: BattlePokemon, context?: BattleContext)`: Calculates raw and optionally modified stats using SP (0-32).
-  - `calculateDamage(attacker: BattlePokemon, defender: BattlePokemon, move: string, context?: BattleContext)`: Returns exact damage rolls, damage ratios, KO chance, and modifier breakdown.
-- **Battle Context Support**:
-  - **Pokémon state**: Handles boosts, major status, volatile conditions, and individual triggered effects.
-  - **Side state**: Handles Tailwind, Reflect, Light Screen, Aurora Veil, rainbow, swamp, etc.
-  - **Field state**: Handles weather, terrain, Trick Room, Gravity, Magic Room, etc.
-  - **Static set data**: Items, abilities, Tera type, gender, and Dynamax/Gigantamax state are part of `ChampionPokemonState`.
-
-### 2.3 Inverse Solver Module (The Core "Smart" Layer)
-Runs *backward* to find optimal SP spreads. Since SP only ranges from 0 to 32, the search space per stat is extremely small (33 options), making the optimization algorithm incredibly fast and robust.
-
-- **Speed Solver (`findSpeedSP`)**:
-  - Finds the minimum Speed SP and appropriate nature to outspeed, tie, or underspeed a target using `BattlePokemon` + `BattleContext`.
-- **Offensive Damage Solver (`findMinOffensiveSP`)**:
-  - Finds the minimum Atk/SpA SP and nature required to achieve a target damage ratio against a defender under full `BattleContext`.
-- **Defensive Damage Solver (`findOptimalDefensiveSP`)**:
-  - Solves the optimal allocation of HP and Def/SpD SP to keep max damage ratio below the requested survival threshold.
+- Runtime: Node.js + TypeScript ESM.
+- MCP SDK: `@modelcontextprotocol/sdk`.
+- Damage/stat engine: `@smogon/calc/adaptable` with `@pkmn/data` as the data source.
+  - `@pkmn/dmg` is not used because it is not published on npm.
+  - `@pkmn/data` is used as the data source to provide the latest Pokémon Showdown data.
+  - `@pkmn/dex` is installed as the underlying data provider for `@pkmn/data`.
+- HTTP/live data: `axios`.
+- Tool schema validation: `zod`.
+- Build: `tsup` (esbuild-powered) bundles `src/index.ts` into a single executable `dist/index.js`, which lets source files use extensionless relative imports (`moduleResolution: "Bundler"` in `tsconfig.json`) while still producing a runnable Node ESM entry point. `tsc --noEmit` remains the type checker.
+- Tests: `vitest`, including MCP stdio e2e tests with a real SDK `Client`.
 
 ---
 
-## 3. MCP Tools Definition
+## 3. File Structure
 
-The MCP Server uses a three-layer battle model:
+```txt
+pokemon-battle-mcp/
+├── Architecture.md
+├── README.md
+├── package.json
+├── tsconfig.json
+├── tsup.config.ts
+├── vitest.config.ts
+├── src/
+│   ├── index.ts              # MCP server creation and stdio entry point
+│   ├── types.ts              # TypeScript request/response and battle model types
+│   ├── tools/
+│   │   ├── common.ts         # MCP response wrappers
+│   │   ├── schemas.ts        # Zod input/output schemas exposed through tools/list
+│   │   ├── meta.ts           # get_meta_snapshot, get_pokemon_options
+│   │   ├── damage.ts         # calculate_stats, check_damage_matchup, offensive/survival solvers
+│   │   └── speed.ts          # optimize_speed_spread, get_speed_tiers
+│   ├── services/
+│   │   ├── meta-source.ts    # Pikalytics live source + bundled fallback support
+│   │   ├── modifiers.ts      # Explicit battle-state speed modifier resolution
+│   │   ├── solver.ts         # Exhaustive SP reverse search
+│   │   └── speed.ts          # Deterministic speed calculation and speed tiers
+│   └── utils/
+│       └── calc.ts           # @smogon/calc wrapper and SP→EV conversion
+└── tests/
+    ├── mcp-e2e.test.ts       # Real MCP stdio client/server integration
+    ├── server.test.ts        # Tool registration and handler smoke tests
+    ├── meta.test.ts
+    ├── damage.test.ts
+    ├── speed.test.ts
+    ├── solver.test.ts
+    └── stats.test.ts
+```
 
-1. **Pokémon static set** — what this Pokémon is.
-2. **Pokémon battle state** — effects attached only to this individual Pokémon.
-3. **Side / field state** — effects attached to one side or the whole battlefield.
+---
 
-This mirrors the way battle simulators conceptually separate `Pokemon`, `Side`, and `Field`, and prevents duplicated state across attacker and defender.
+## 4. Live Meta Source
 
-### 3.0 Shared Types
+### 4.1 Default provider
+
+The primary live provider is **Pikalytics**. Default request target:
+
+```txt
+https://www.pikalytics.com/api/p/{YYYY-MM}/battledataregmbs3-1760
+https://www.pikalytics.com/api/p/{YYYY-MM}/battledataregmbs3-1760/garchomp
+```
+
+Defaults:
+
+- `format key = battledataregmbs3` (Pokémon Champions Reg M-B S3 ranked ladder)
+- `rating cutoff = 1760`
+- `format = double`
+
+Pikalytics returns English-ready JSON with rank, moves, items, abilities, natures, SP spreads, teammates, counters, and tournament teams. The list endpoint returns the full ranked dataset; the Pokémon endpoint is used as a direct lookup fallback.
+
+The `{YYYY-MM}` data month is discovered at runtime. The service tries a preferred known-good month first, then probes recent months newest-first. Pikalytics returns the literal JSON value `false` for unavailable months, which makes this probing cheap and deterministic.
+
+### 4.2 Runtime behavior
+
+Pikalytics is the only live provider. Provider selection is not configurable.
+
+Internal defaults:
+
+- base URL: `https://www.pikalytics.com`;
+- current format/rule: `battledataregmbs3` (kept as an internal constant and updated in code when the current regulation changes);
+- rating cutoff: `1760`;
+- preferred data month: `2026-05` (tried first, with automatic recent-month probing after it);
+- default format: `double` when a request omits `format`;
+- HTTP timeout: `8000 ms`.
+
+`format` is accepted by the request body (`single`/`double`, with `singles`/`doubles` aliases), but Pikalytics' `battledataregmbs3` source is the Champions doubles ladder, so current live meta requests use that one dataset. Season/regulation is intentionally not part of the public request schema; the service always uses the current internal provider key.
+
+### 4.3 Fallback behavior
+
+If live fetch/parsing fails, the server falls back to a small bundled seed so tools still return well-formed data. Every meta response includes a `source` string indicating whether live Pikalytics data or fallback data was used.
+
+### 4.4 Pokémon name normalization
+
+All tools share one name resolver (`src/utils/pokemon-name.ts`) that bridges the two naming conventions in play:
+
+- Showdown data (`@pkmn/dex`, used by the calc tools): abbreviated formes such as `Basculegion-F`, `Landorus-Therian`, plus Showdown aliases (`lando-t`).
+- Pikalytics (used by the meta tools): URL slugs compatible with PokeAPI-style full-word formes such as `basculegion-female`, while some pages also accept abbreviated formes such as `basculegion-f`.
+
+Any common spelling is accepted everywhere. The resolver canonicalizes through the Showdown dex (expanding/abbreviating gender suffixes as needed) and converts deterministically to provider slugs (`Basculegion-F` <-> `basculegion-female`; `Basculegion-Male` -> `basculegion`, since male is the base forme). Calc tools report material renames as `speciesNameNormalized` input corrections; unknown names raise errors with did-you-mean suggestions drawn from the dex and the current meta snapshot.
+
+For `get_pokemon_options`, matching against the live ranking proceeds in this order:
+
+1. Exact match on any accepted spelling (English name, slug, display name, Showdown name/alias).
+2. Forme upgrade: a base-species request resolves to the only ranked forme (`Floette` -> `Floette-Mega`) with a `formeResolved` input correction; multiple ranked formes raise an ambiguity error listing candidates instead of guessing.
+3. Detail lookup tries the canonical slug first, then progressively less-specific slugs (`rotom-wash` before `rotom`). If a less-specific page is used for a distinct requested forme, the response carries a `formeDataFallback` input correction and an explicit `metaNotes` warning — never a silent base-forme substitution.
+
+If neither the ranking nor any candidate detail page resolves, the tool returns an empty option shell with `metaNotes` listing attempted slugs and did-you-mean suggestions.
+
+When the request names a Mega forme, `get_pokemon_options` returns the canonical Mega forme name and fixed Mega ability even if Pikalytics only has base-form move/item/spread data. For example, `Lucario-Mega` returns `Adaptability`, and generated builds mark `abilitySource: 'mega-default'`.
+
+---
+
+## 5. Battle Model
+
+The server separates battle data into three layers:
+
+1. **Static Pokémon set**: species, nature, item, ability, tera type, SP, gender, dynamax state.
+2. **Individual Pokémon battle state**: boosts, major status, triggered effects, volatile conditions.
+3. **Side and field state**: Tailwind, Reflect, screens, weather, terrain, Trick Room, etc.
+
+This mirrors simulator concepts (`Pokemon`, `Side`, `Field`) and prevents shared effects from being duplicated on Pokémon objects.
+
+### 5.1 Shared types
+
+The implementation types live in `src/types.ts`. Key types:
 
 ```ts
 type StatID = 'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe';
@@ -97,67 +184,48 @@ type StatTable = Record<StatID, number>;
 type PartialStatTable = Partial<StatTable>;
 
 type BoostID = 'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'accuracy' | 'evasion';
-type BoostTable = Partial<Record<BoostID, number>>; // -6 to +6
+type BoostTable = Partial<Record<BoostID, number>>;
 
-type Gender = 'male' | 'female' | 'genderless' | 'unknown';
-type DynamaxState = 'none' | 'dynamax' | 'gigantamax';
 type BattleFormat = 'singles' | 'doubles';
-
-type StatusCondition =
-  | 'none'
-  | 'burn'
-  | 'paralysis'
-  | 'sleep'
-  | 'freeze'
-  | 'poison'
-  | 'toxic';
-
 type Weather = 'none' | 'sun' | 'rain' | 'sand' | 'snow';
 type Terrain = 'none' | 'electric' | 'grassy' | 'misty' | 'psychic';
 type EffectMode = 'auto' | 'active' | 'inactive';
+type AbilitySource = 'species-default' | 'mega-default' | 'battle-changed' | 'manual';
 
-type Relation = 'outspeed' | 'speedTie' | 'underspeed';
-type DamageRatioMode = 'min' | 'max' | 'average';
-
-type BattleEffectSource = 'ability' | 'item' | 'move' | 'field' | 'side' | 'manual';
+type InputCorrection = {
+  code: string;
+  path: string;
+  from?: unknown;
+  to?: unknown;
+  reason: string;
+};
 
 type BattleEffect = {
-  /** Canonical ID, e.g. 'itemconsumed', 'flashfire', 'helpinghand', 'confusion', 'trickroom'. */
   id: string;
-  source?: BattleEffectSource;
-  active?: boolean; // default true
+  source?: 'ability' | 'item' | 'move' | 'field' | 'side' | 'manual';
+  active?: boolean;
   duration?: number;
   params?: Record<string, unknown>;
 };
 
 type ChampionPokemonState = {
-  /** Species / forme name. Gender should NOT be encoded in name. */
   name: string;
-  gender?: Gender;
-
-  /** Pokémon Champions ability points, 0-32 per stat. Solver tools may leave target stat variable. */
+  gender?: 'male' | 'female' | 'genderless' | 'unknown';
   sp: PartialStatTable;
-
   nature: string;
   item?: string;
   ability?: string;
+  abilitySource?: AbilitySource;
   teraType?: string;
-  dynamax?: DynamaxState; // Usually 'none' for Champions unless a format explicitly enables it.
+  dynamax?: 'none' | 'dynamax' | 'gigantamax';
 };
 
 type PokemonBattleState = {
-  /** Stat stages only. Not Tailwind / Swift Swim / Choice Scarf. */
   boosts?: BoostTable;
-  status?: StatusCondition;
-
-  /** Controls whether the speed/damage-relevant ability/item effect should be inferred or forced. */
+  status?: 'none' | 'burn' | 'paralysis' | 'sleep' | 'freeze' | 'poison' | 'toxic';
   abilityEffect?: EffectMode;
   itemEffect?: EffectMode;
-
-  /** Individual triggered effects: itemconsumed, flashfire, helpinghand, charge, crit, etc. */
   activeEffects?: BattleEffect[];
-
-  /** Individual temporary conditions: confusion, taunt, encore, substitute, leechseed, etc. */
   volatileConditions?: BattleEffect[];
 };
 
@@ -166,64 +234,41 @@ type BattlePokemon = {
   state?: PokemonBattleState;
 };
 
-type SideState = {
-  /** tailwind, reflect, lightscreen, auroraveil, safeguard, mist, rainbow, seaoffire, swamp, etc. */
-  sideConditions?: BattleEffect[];
-};
-
-type FieldState = {
-  weather?: Weather;
-  terrain?: Terrain;
-
-  /** trickroom, gravity, wonderroom, magicroom, etc. */
-  fieldConditions?: BattleEffect[];
-};
-
 type BattleContext = {
-  field?: FieldState;
-  attackerSide?: SideState;
-  defenderSide?: SideState;
+  field?: {
+    weather?: Weather;
+    terrain?: Terrain;
+    fieldConditions?: BattleEffect[];
+  };
+  attackerSide?: { sideConditions?: BattleEffect[] };
+  defenderSide?: { sideConditions?: BattleEffect[] };
   format?: BattleFormat;
 };
-
-type SPBudget = {
-  maxTotalSP?: number; // default 66
-  reservedSP?: number; // default inferred from known SP
-};
-
-type DamageThreshold = {
-  mode: DamageRatioMode;
-  value: number; // e.g. 1.0 for 100% defender max HP
-};
-
-type MetaSpread = {
-  nature: string;
-  sp: StatTable;
-  usage?: number;
-  label?: string;
-};
-
-type ModifierBreakdown = string[];
 ```
 
-Design rule:
-- `ChampionPokemonState` describes the static set: species, gender, nature, item, ability, tera, Dynamax/Gigantamax state, and SP.
-- `PokemonBattleState` describes only states attached to this Pokémon: boosts, status, confusion, item consumed, Helping Hand, etc.
-- `SideState` describes side-scoped effects: Tailwind, Reflect, Light Screen, Aurora Veil, rainbow, etc.
-- `FieldState` describes global battlefield effects: weather, terrain, Trick Room, Gravity, Magic Room, etc.
+### 5.2 Design rules
+
+- `ChampionPokemonState` is static set data only.
+- `PokemonBattleState` is individual battle history/state only.
+- `SideState` is side-scoped effects such as Tailwind, Reflect, Light Screen, Aurora Veil.
+- `FieldState` is global effects such as weather, terrain, Trick Room, Gravity, Magic Room.
 - `BattleEffect.id` is string-based so new mechanics do not require schema changes.
-- Internal resolvers translate this semantic model into `@pkmn/dmg` / `@smogon/calc` objects.
+- Internal resolvers translate this semantic model into `@smogon/calc` objects.
+- Mega forme abilities are canonicalized by default before calculation. If the current ability was changed in battle (for example by Skill Swap or Worry Seed), clients must send the changed `pokemon.ability` with `pokemon.abilitySource: 'battle-changed'` or an active ability-change effect such as `{ id: 'abilitychanged' }`, `{ id: 'skillswap' }`, or `{ id: 'worryseed' }`. Use `abilityEffect: 'inactive'` for suppression effects such as Gastro Acid while keeping the actual ability name.
 
 ---
 
-### 3.1 `get_meta_snapshot`
+## 6. Tool Surface
 
-Get the latest popular Pokémon, moves, items, abilities, and common SP spreads for the current Pokémon Champions format.
+All tools are registered in `src/index.ts` via `src/tools/*`. Every tool exposes both an input schema and an output schema through MCP `tools/list`. Successful calls return text JSON and `structuredContent`. Tool errors return `isError: true` and text content only, so SDK clients do not validate an error payload against the success output schema.
+
+### 6.1 `get_meta_snapshot`
 
 ```ts
 type GetMetaSnapshotRequest = {
-  limit?: number; // default 20
+  limit?: number;          // default 20
   includeBuilds?: boolean; // default true
+  format?: 'single' | 'double' | 'singles' | 'doubles'; // default double
 };
 
 type MetaPokemonSummary = {
@@ -238,55 +283,60 @@ type MetaPokemonSummary = {
 
 type GetMetaSnapshotResponse = {
   format: 'pokemon-champions';
-  generatedAt: string; // ISO timestamp
+  generatedAt: string;
   source?: string;
   pokemon: MetaPokemonSummary[];
 };
 ```
 
----
-
-### 3.2 `get_pokemon_options`
-
-Get common sets and tactical options for one Pokémon.
+### 6.2 `get_pokemon_options`
 
 ```ts
 type GetPokemonOptionsRequest = {
-  pokemon: string;
+  pokemon: string;         // any common spelling; normalized per section 4.4
   includeTeammates?: boolean;
   includeCounters?: boolean;
-};
-
-type PokemonOptionUsage = {
-  name: string;
-  usage?: number;
-};
-
-type PokemonBuildOption = {
-  label?: string;
-  pokemon: ChampionPokemonState;
-  moves?: string[];
-  usage?: number;
+  format?: 'single' | 'double' | 'singles' | 'doubles'; // default double
 };
 
 type GetPokemonOptionsResponse = {
+  inputCorrections?: InputCorrection[]; // formeResolved, formeDataFallback, ...
   pokemon: string;
-  moves: PokemonOptionUsage[];
-  items: PokemonOptionUsage[];
-  abilities: PokemonOptionUsage[];
+  moves: Array<{ name: string; usage?: number }>;
+  items: Array<{ name: string; usage?: number }>;
+  abilities: Array<{ name: string; usage?: number }>;
   spreads: MetaSpread[];
-  builds?: PokemonBuildOption[];
-  teammates?: PokemonOptionUsage[];
-  counters?: PokemonOptionUsage[];
+  builds?: Array<{
+    label?: string;
+    pokemon: ChampionPokemonState;
+    moves?: string[];
+    usage?: number;
+  }>;
+  teammates?: Array<{ name: string; usage?: number }>;
+  counters?: Array<{ name: string; usage?: number }>;
   metaNotes?: string[];
 };
 ```
 
----
+For Mega forme requests, `abilities` contains the fixed Mega ability with `usage: 1`, and generated builds use that ability even if the rest of the set data comes from a base-form meta page.
 
-### 3.3 `check_damage_matchup`
+### 6.3 `calculate_stats`
 
-Run a forward damage calculation.
+```ts
+type CalculateStatsRequest = {
+  pokemon: BattlePokemon;
+  context?: BattleContext;
+};
+
+type CalculateStatsResponse = {
+  inputCorrections?: InputCorrection[];
+  rawStats: StatTable;
+  modifiedStats?: StatTable;
+  modifierBreakdown: string[];
+};
+```
+
+### 6.4 `check_damage_matchup`
 
 ```ts
 type CheckDamageMatchupRequest = {
@@ -297,93 +347,68 @@ type CheckDamageMatchupRequest = {
 };
 
 type CheckDamageMatchupResponse = {
-  damageRange: [number, number]; // min/max damage ratio of defender max HP, e.g. [0.916, 1.093]
+  inputCorrections?: InputCorrection[];
+  damageRange: [number, number];
   damageRolls: number[];
   damageRollRatios: number[];
-  koChance: number; // 0 to 1
-  modifierBreakdown: ModifierBreakdown;
+  koChance: number;
+  modifierBreakdown: string[];
   description: string;
 };
 ```
 
-Notes:
-- Static item / ability names are resolved by the calc engine.
-- Triggered individual effects must be represented in `PokemonBattleState`, e.g. `boosts.atk = -1`, `activeEffects: [{ id: 'helpinghand' }]`.
-- Side and field effects must be represented in `BattleContext`, not duplicated on both Pokémon.
-
----
-
-### 3.4 `optimize_offensive_spread`
-
-Find the minimum offensive SP and nature needed to reach a damage threshold.
+### 6.5 `optimize_offensive_spread`
 
 ```ts
 type OptimizeOffensiveSpreadRequest = {
-  attacker: BattlePokemon; // attacking stat SP may be omitted or variable
+  attacker: BattlePokemon;
   defender: BattlePokemon;
   move: string;
   context?: BattleContext;
-
-  offensiveStat?: 'atk' | 'spa'; // inferred from move if omitted
-  targetDamageRatio: DamageThreshold; // e.g. { mode: 'min', value: 1.0 } for guaranteed OHKO
+  offensiveStat?: 'atk' | 'spa';
+  targetDamageRatio: { mode: 'min' | 'max' | 'average'; value: number };
   allowedNatures?: string[];
-
-  spBudget?: SPBudget & {
-    maxStatSP?: number; // default 32
-  };
+  spBudget?: { maxTotalSP?: number; reservedSP?: number; maxStatSP?: number };
 };
 
 type OptimizeOffensiveSpreadResponse = {
+  inputCorrections?: InputCorrection[];
   recommendedNature: string;
   requiredSP: number;
   resultingDamageRange: [number, number];
   koChance: number;
-  modifierBreakdown: ModifierBreakdown;
+  modifierBreakdown: string[];
   isFeasibleUnderBudget: boolean;
 };
 ```
 
----
-
-### 3.5 `optimize_survival_spread`
-
-Find the minimum defensive SP allocation needed to survive a specified attack.
+### 6.6 `optimize_survival_spread`
 
 ```ts
 type OptimizeSurvivalSpreadRequest = {
-  defender: BattlePokemon; // hp and relevant defensive stat SP may be omitted or variable
+  defender: BattlePokemon;
   attacker: BattlePokemon;
   move: string;
   context?: BattleContext;
-
-  defensiveStat?: 'def' | 'spd'; // inferred from move if omitted
-  survivalThreshold?: {
-    maxDamageRatioLessThan?: number; // default 1.0
-  };
+  defensiveStat?: 'def' | 'spd';
+  survivalThreshold?: { maxDamageRatioLessThan?: number };
   allowedNatures?: string[];
-
-  spBudget?: SPBudget & {
-    maxHPSP?: number; // default 32
-    maxDefenseSP?: number; // default 32
-  };
+  spBudget?: { maxTotalSP?: number; reservedSP?: number; maxHPSP?: number; maxDefenseSP?: number };
 };
 
 type OptimizeSurvivalSpreadResponse = {
+  inputCorrections?: InputCorrection[];
   recommendedNature: string;
   recommendedSP: PartialStatTable;
   totalSPUsed: number;
   resultingDamageRange: [number, number];
   survives: boolean;
-  modifierBreakdown: ModifierBreakdown;
+  modifierBreakdown: string[];
   isFeasibleUnderBudget: boolean;
 };
 ```
 
----
-
-### 3.6 `optimize_speed_spread`
-
-Find the minimum Speed SP and nature needed to outspeed, speed tie, or underspeed a target.
+### 6.7 `optimize_speed_spread`
 
 ```ts
 type SpeedTarget =
@@ -391,46 +416,33 @@ type SpeedTarget =
   | { speed?: never; battlePokemon: BattlePokemon; benchmarkLabel?: string };
 
 type OptimizeSpeedSpreadRequest = {
-  self: BattlePokemon; // pokemon.sp.spe may be omitted or variable
+  self: BattlePokemon;
   target: SpeedTarget;
   context?: BattleContext;
-
-  relation: Relation;
+  relation: 'outspeed' | 'speedTie' | 'underspeed';
   allowedNatures?: string[];
-
-  spBudget?: SPBudget & {
-    maxSpeedSP?: number; // default 32
-  };
+  spBudget?: { maxTotalSP?: number; reservedSP?: number; maxSpeedSP?: number };
 };
 
 type OptimizeSpeedSpreadResponse = {
+  inputCorrections?: InputCorrection[];
   recommendedNature: string;
   requiredSpeedSP: number;
   resultingRawSpeed: number;
   resultingFinalSpeed: number;
   targetFinalSpeed: number;
   margin: number;
-  modifierBreakdown: ModifierBreakdown;
+  modifierBreakdown: string[];
   isFeasibleUnderBudget: boolean;
 };
 ```
 
-Important speed rule:
-- `state.boosts.spe` is only the Speed stage.
-- Tailwind, Swift Swim, Unburden, Choice Scarf, Booster Energy, paralysis, etc. are resolved as separate modifiers from `PokemonBattleState` + `SideState` + `FieldState` + item/ability.
-
----
-
-### 3.7 `get_speed_tiers`
-
-Return sorted speed benchmarks in the current metagame.
+### 6.8 `get_speed_tiers`
 
 ```ts
 type GetSpeedTiersRequest = {
-  limit?: number; // default 50
+  limit?: number;             // default 50
   includeModifiers?: boolean; // default true
-
-  /** Generic, future-proof filters. Avoid adding one boolean per mechanic. */
   filters?: SpeedTierFilter[];
 };
 
@@ -441,349 +453,101 @@ type SpeedTierFilter =
   | { type: 'ability'; values: string[] }
   | { type: 'tag'; values: string[] };
 
-type SpeedTierEntry = {
-  pokemon: BattlePokemon;
-  context?: BattleContext;
-  rawSpeed: number;
-  finalSpeed: number;
-  description: string;
-  modifierBreakdown: ModifierBreakdown;
-  source?: string;
-};
-
 type GetSpeedTiersResponse = {
-  generatedAt: string; // ISO timestamp
-  tiers: SpeedTierEntry[];
+  generatedAt: string;
+  tiers: Array<{
+    pokemon: BattlePokemon;
+    context?: BattleContext;
+    rawSpeed: number;
+    finalSpeed: number;
+    description: string;
+    modifierBreakdown: string[];
+    source?: string;
+  }>;
 };
 ```
 
 ---
 
-### 3.8 `calculate_stats`
+## 7. Calculation and Modifier Resolution
 
-Calculate Pokémon Champions level-50 stats from species, nature, and SP.
+### 7.1 Damage/stat engine
 
-```ts
-type CalculateStatsRequest = {
-  pokemon: BattlePokemon;
-  context?: BattleContext;
-};
+`src/utils/calc.ts` wraps `@smogon/calc/adaptable` with `@pkmn/data` (backed by `@pkmn/dex`) as the data layer:
 
-type CalculateStatsResponse = {
-  rawStats: StatTable;
-  modifiedStats?: StatTable;
-  modifierBreakdown: ModifierBreakdown;
-};
-```
+- validates SP (`0..32` each, total `<=66`);
+- converts SP to EVs (`SP * 8`);
+- fixes level to `50` and IVs to `31`;
+- translates `BattlePokemon` and `BattleContext` into calc `Pokemon`, `Move`, `Field`, and `Side` objects;
+- returns exact damage rolls, HP ratios, KO chance, and calc description.
 
----
+### 7.2 Explicit battle-state assumptions
 
-### 3.9 Tool Call Examples
+The calculator can apply many static item/ability effects when the Pokémon object contains the names. It cannot infer battle history. Therefore these must be explicit.
 
-#### Example A: `check_damage_matchup` — Intimidated Landorus into Reflect
+Mega forme ability normalization happens before stat, speed, damage, and solver calculations:
 
-```json
-{
-  "attacker": {
-    "pokemon": {
-      "name": "Landorus-Therian",
-      "gender": "male",
-      "nature": "Adamant",
-      "ability": "Intimidate",
-      "item": "Life Orb",
-      "teraType": "Ground",
-      "dynamax": "none",
-      "sp": { "hp": 0, "atk": 32, "def": 0, "spa": 0, "spd": 0, "spe": 32 }
-    },
-    "state": {
-      "boosts": { "atk": -1 },
-      "status": "none"
-    }
-  },
-  "defender": {
-    "pokemon": {
-      "name": "Incineroar",
-      "gender": "male",
-      "nature": "Careful",
-      "ability": "Intimidate",
-      "item": "Sitrus Berry",
-      "dynamax": "none",
-      "sp": { "hp": 32, "atk": 0, "def": 16, "spa": 0, "spd": 18, "spe": 0 }
-    },
-    "state": { "status": "none" }
-  },
-  "move": "Earthquake",
-  "context": {
-    "format": "doubles",
-    "field": { "weather": "none", "terrain": "none" },
-    "defenderSide": {
-      "sideConditions": [{ "id": "reflect", "source": "move" }]
-    }
-  }
-}
-```
+- Missing or stale abilities on Mega formes are replaced with the fixed Mega ability, and the response includes `inputCorrections` plus a matching line in `modifierBreakdown`.
+- If the current ability was changed by battle history, send the changed ability and mark it explicitly, e.g. `abilitySource: 'battle-changed'` with `state.activeEffects: [{ id: 'worryseed', source: 'move' }]`. The server then respects the submitted ability.
+- If the ability is merely suppressed, keep the actual ability and use `state.abilityEffect: 'inactive'`.
 
-#### Example B: `optimize_offensive_spread` — Milotic Competitive under Rain
+Other history-dependent effects must also be explicit:
 
-```json
-{
-  "attacker": {
-    "pokemon": {
-      "name": "Milotic",
-      "gender": "female",
-      "nature": "Modest",
-      "ability": "Competitive",
-      "item": "Life Orb",
-      "sp": { "hp": 0, "atk": 0, "def": 0, "spd": 2, "spe": 32 }
-    },
-    "state": {
-      "boosts": { "spa": 2 },
-      "activeEffects": [{ "id": "competitive", "source": "ability" }]
-    }
-  },
-  "defender": {
-    "pokemon": {
-      "name": "Incineroar",
-      "gender": "male",
-      "nature": "Careful",
-      "ability": "Intimidate",
-      "item": "Assault Vest",
-      "sp": { "hp": 32, "atk": 0, "def": 0, "spa": 0, "spd": 32, "spe": 2 }
-    }
-  },
-  "move": "Muddy Water",
-  "context": {
-    "format": "doubles",
-    "field": { "weather": "rain", "terrain": "none" }
-  },
-  "offensiveStat": "spa",
-  "targetDamageRatio": { "mode": "min", "value": 1.0 },
-  "allowedNatures": ["Modest", "Timid"],
-  "spBudget": { "maxStatSP": 32, "maxTotalSP": 66 }
-}
-```
+- Intimidated attacker: `state.boosts.atk = -1`.
+- Competitive triggered: `state.boosts.spa = 2`.
+- Helping Hand: `state.activeEffects = [{ id: 'helpinghand' }]`.
+- Critical hit: `state.activeEffects = [{ id: 'crit' }]`.
+- Unburden active: `abilityEffect: 'active'` or `activeEffects: [{ id: 'itemconsumed' }]`.
+- Booster/Paradox speed boost: `activeEffects: [{ id: 'boosterspeed' }]` or forced ability effect.
 
-#### Example C: `optimize_survival_spread` — Survive Life Orb Earthquake
+### 7.3 Speed calculation
 
-```json
-{
-  "defender": {
-    "pokemon": {
-      "name": "Incineroar",
-      "gender": "male",
-      "nature": "Careful",
-      "ability": "Intimidate",
-      "item": "Sitrus Berry",
-      "sp": { "atk": 0, "spa": 0, "spd": 18, "spe": 0 }
-    },
-    "state": { "status": "none" }
-  },
-  "attacker": {
-    "pokemon": {
-      "name": "Landorus-Therian",
-      "gender": "male",
-      "nature": "Adamant",
-      "ability": "Intimidate",
-      "item": "Life Orb",
-      "sp": { "hp": 0, "atk": 32, "def": 0, "spa": 0, "spd": 0, "spe": 32 }
-    },
-    "state": { "boosts": { "atk": -1 } }
-  },
-  "move": "Earthquake",
-  "context": { "format": "doubles" },
-  "defensiveStat": "def",
-  "survivalThreshold": { "maxDamageRatioLessThan": 1.0 },
-  "spBudget": { "maxHPSP": 32, "maxDefenseSP": 32, "maxTotalSP": 66 }
-}
-```
+Speed is computed in deterministic integer layers:
 
-#### Example D: `optimize_speed_spread` — Unburden Sneasler vs Booster Flutter Mane
-
-```json
-{
-  "self": {
-    "pokemon": {
-      "name": "Sneasler",
-      "gender": "female",
-      "nature": "Adamant",
-      "ability": "Unburden",
-      "item": "Psychic Seed",
-      "sp": { "hp": 0, "atk": 32, "def": 0, "spa": 0, "spd": 2 }
-    },
-    "state": {
-      "abilityEffect": "active",
-      "activeEffects": [{ "id": "itemconsumed", "source": "item" }]
-    }
-  },
-  "target": {
-    "battlePokemon": {
-      "pokemon": {
-        "name": "Flutter Mane",
-        "gender": "genderless",
-        "nature": "Timid",
-        "ability": "Protosynthesis",
-        "item": "Booster Energy",
-        "sp": { "hp": 0, "atk": 0, "def": 0, "spa": 32, "spd": 2, "spe": 32 }
-      },
-      "state": {
-        "abilityEffect": "active",
-        "activeEffects": [{ "id": "boosterspeed", "source": "item" }]
-      }
-    }
-  },
-  "context": {
-    "format": "doubles",
-    "field": { "weather": "none", "terrain": "psychic" }
-  },
-  "relation": "outspeed",
-  "allowedNatures": ["Adamant", "Jolly"],
-  "spBudget": { "maxSpeedSP": 32, "maxTotalSP": 66 }
-}
-```
-
-#### Example E: `optimize_speed_spread` — Underspeed in Trick Room
-
-```json
-{
-  "self": {
-    "pokemon": {
-      "name": "Ursaluna-Bloodmoon",
-      "gender": "male",
-      "nature": "Quiet",
-      "ability": "Mind's Eye",
-      "item": "Throat Spray",
-      "sp": { "hp": 32, "atk": 0, "def": 0, "spa": 32, "spd": 2 }
-    }
-  },
-  "target": {
-    "battlePokemon": {
-      "pokemon": {
-        "name": "Incineroar",
-        "gender": "male",
-        "nature": "Careful",
-        "ability": "Intimidate",
-        "sp": { "hp": 32, "atk": 0, "def": 0, "spa": 0, "spd": 32, "spe": 2 }
-      }
-    }
-  },
-  "context": {
-    "format": "doubles",
-    "field": {
-      "weather": "none",
-      "terrain": "none",
-      "fieldConditions": [{ "id": "trickroom", "source": "field" }]
-    }
-  },
-  "relation": "underspeed",
-  "allowedNatures": ["Quiet"]
-}
-```
-
-## 4. Modifier Resolution Design
-
-A key architectural rule: **names are not always enough**. Item names and ability names can be resolved by the calculation library, but only after the MCP server provides the correct battle state.
-
-### 4.1 What Libraries Can Resolve Automatically
-Damage libraries such as `@pkmn/dmg` / `@smogon/calc` can correctly apply many item and ability effects when they are explicitly present on the Pokémon object:
-- Damage items: Life Orb, Choice Band, Choice Specs, type-boosting items, plates, feathers, etc.
-- Damage abilities: Adaptability, Fairy Aura, Tough Claws, Technician, etc.
-- Defensive abilities/items: Thick Fat, Filter, Friend Guard, Assault Vest, Eviolite, etc.
-- Field effects: weather, terrain, screens, aura effects when represented in the field/context.
-
-However, they **do not infer battle history** from names alone. For example:
-- If the defender has `Intimidate`, the calculator does not automatically know the attacker has already been intimidated.
-- If the attacker has `Competitive`, the calculator does not automatically know it was triggered by Intimidate.
-- If the attacker has `Unburden`, the calculator does not automatically know its item was consumed.
-
-Therefore, the MCP server must separate **static set data** from **dynamic battle state**.
-
-### 4.2 Battle State Model
-The server intentionally separates battle state into three layers, as defined in **Section 3**:
-
-- `PokemonBattleState`: individual Pokémon state, such as boosts, major status, confusion, item consumed, Flash Fire active, Helping Hand, etc.
-- `SideState`: one-side state, such as Tailwind, Reflect, Light Screen, Aurora Veil, rainbow, sea of fire, swamp, Safeguard, Mist, etc.
-- `FieldState`: global battlefield state, such as weather, terrain, Trick Room, Gravity, Wonder Room, and Magic Room.
-
-This split avoids duplicating shared effects on both attacker and defender. For example:
-- Reflect belongs to `context.defenderSide.sideConditions`, not the defender Pokémon.
-- Tailwind belongs to the relevant side, not the Pokémon.
-- Rain and Electric Terrain belong to `context.field`.
-- Burn, paralysis, confusion, item consumed, and Flash Fire active belong to the individual Pokémon.
-
-The solver may provide convenience presets such as:
-- `assumeIntimidated: true` -> attacker `state.boosts.atk = -1`.
-- `assumeCompetitiveTriggered: true` -> attacker `state.boosts.spa = +2`.
-- `abilityEffect: 'active'` with `ability: 'Unburden'` -> speed modifier `x2` if the resolver accepts the forced active state.
-
-But these are explicit battle-state assumptions, not derived blindly from ability names.
-
-### 4.3 Speed Modifier Model
-Speed abilities and items are **not speed stages**.
-
-For example:
-- `Swift Swim` under rain is **speed x2**, not `speedStage +2`.
-- `Unburden` after item consumption is **speed x2**, not `speedStage +2`.
-- `Choice Scarf` is **speed x1.5**, not `speedStage +1`.
-- `Tailwind` is **speed x2**, not `speedStage +2`.
-
-This matters because stages cap at `+6`, but non-stage modifiers stack on top of staged speed.
-
-Example:
 ```txt
-Base calculated Speed = 100
-Speed stage +6 = 100 * 4 = 400
-Swift Swim active = 400 * 2 = 800
-Tailwind active = 800 * 2 = 1600
+rawSpeed     = Champions stat formula
+stagedSpeed  = apply Speed stage (-6..+6)
+finalSpeed   = floor(stagedSpeed * rational non-stage modifiers)
 ```
 
-So a Pokémon at `+6` Speed can still be further doubled by Swift Swim, Unburden, Tailwind, etc.
+Non-stage speed modifiers include Tailwind, Choice Scarf, Iron Ball, Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Surge Surfer, Unburden, Protosynthesis/Quark Drive speed boost, Booster Energy speed boost, Swamp, and paralysis.
 
-The speed engine should compute speed in layers:
-
-```ts
-rawSpeed = calculateChampionStat(baseSpeed, speedSP, nature);
-stagedSpeed = applyStatStage(rawSpeed, speedStage);      // -6 to +6
-modifiedSpeed = applySpeedModifiers(stagedSpeed, [
-  hasSideCondition(sideState, 'tailwind') ? 2 : 1,
-  choiceScarfActive ? 1.5 : 1,
-  swiftSwimActive ? 2 : 1,
-  unburdenActive ? 2 : 1,
-  pokemonState.status === 'paralysis' ? 0.5 : 1,
-]);
-finalSpeed = floorWithGameRules(modifiedSpeed);
-```
-
-The implementation should use deterministic integer modifier math instead of loose floating-point multiplication, because one point of Speed can decide the turn order.
+Trick Room is reported in the breakdown but does not change final Speed; it changes move-order interpretation.
 
 ---
 
-## 5. Technical Implementation & Flow
+## 8. Solver Design
 
-### 5.1 Technology Stack
-- **Runtime**: Node.js (TypeScript)
-- **SDK**: `@modelcontextprotocol/sdk`
-- **Simulation**: `@pkmn/dmg` and `@pkmn/data` (translating `SP` to `EV` by multiplying by 8, and fixing `IV` to 31, `level` to 50)
-- **Scraping/Data**: Axios with local cache
+The solver module uses exhaustive search over the small SP space:
 
-### 5.2 File Structure
-```txt
-pokemon-battle-mcp/
-├── package.json
-├── tsconfig.json
-├── Architecture.md
-└── src/
-    ├── index.ts              # MCP Server entry & registration
-    ├── tools/
-    │   ├── meta.ts           # Handles get_meta_snapshot, get_pokemon_options
-    │   ├── damage.ts         # Handles check_damage_matchup, optimize_offensive/survival
-    │   └── speed.ts          # Handles optimize_speed_spread, get_speed_tiers
-    ├── services/
-    │   ├── meta-source.ts    # poch.ms / Pikalytics / Smogon data source helpers
-    │   ├── solver.ts         # Math logic for SP reverse search
-    │   ├── modifiers.ts      # Explicit battle-state and modifier resolution
-    │   └── speed.ts          # Deterministic speed calculation engine
-    └── utils/
-        └── calc.ts           # Wrapper for @pkmn/dmg (SP -> EV mapping)
-```
+- offensive stat: `0..maxStatSP` for each allowed nature;
+- survival: HP `0..maxHPSP` × Def/SpD `0..maxDefenseSP` for each allowed nature;
+- speed: Speed `0..maxSpeedSP` for each allowed nature.
+
+Budget defaults:
+
+- max total SP: `66`;
+- max per optimized stat: `32`;
+- reserved SP defaults to known SP outside the optimized stats.
+
+If no candidate satisfies the target under budget, the best evaluated candidate is returned with `isFeasibleUnderBudget: false`.
 
 ---
+
+## 9. Test Strategy
+
+The test suite covers:
+
+- Champions stat formula and SP validation;
+- deterministic speed modifier layering;
+- forward damage calculations and side/field translation;
+- inverse solvers;
+- meta fallback behavior;
+- MCP server registration;
+- MCP stdio e2e behavior with a real SDK `Client`:
+  - `tools/list` exposes useful input/output schemas;
+  - a client can call tools over stdio;
+  - handler-level errors return MCP tool error results without invalid structured output;
+  - invalid input is rejected by schema validation.
+
+`npm test` runs `npm run typecheck` and `npm run build` first so e2e tests always start the current, type-checked `dist/index.js`.
