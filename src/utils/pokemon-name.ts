@@ -2,7 +2,7 @@
  * Shared Pokémon name resolution (single source of truth for both data paths).
  *
  * The server consumes two data sources with different naming conventions:
- *   - Pokémon Showdown data via @pkmn/dex (calc tools): abbreviated formes,
+ *   - Pokémon Showdown Champions data (calc tools): abbreviated formes,
  *     e.g. `Basculegion-F`, `Landorus-Therian`, `Charizard-Mega-X`.
  *   - Live meta tools: PokeAPI-style URL slugs with full-word formes,
  *     e.g. `basculegion-female`, `urshifu-rapid-strike`.
@@ -12,13 +12,10 @@
  * needs. Unknown names produce did-you-mean suggestions.
  */
 
-import { Dex } from '@pkmn/dex';
-import { Generations, toID, type GenerationNum } from '@pkmn/data';
+import { toID } from '@pkmn/data';
+import { gen, GENERATION } from '../data/champions-dex';
 
-export const GENERATION: GenerationNum = 9;
-
-const gens = new Generations(Dex, d => !!d.exists);
-export const gen = gens.get(GENERATION);
+export { gen, GENERATION } from '../data/champions-dex';
 
 /** Thrown for invalid user-provided input (bad species/move/SP). Surfaced as a tool error. */
 export class UserInputError extends Error {

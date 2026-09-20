@@ -12,6 +12,8 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:showdown": "npm --prefix node_modules/pokemon-showdown run build",
+    "postinstall": "npm run build:showdown",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "npm run typecheck && npm run build",
@@ -21,9 +23,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@pkmn/data": "^0.10.11",
-    "@pkmn/dex": "^0.10.11",
     "@smogon/calc": "^0.11.0",
     "axios": "^1.18.1",
+    "pokemon-showdown": "https://github.com/smogon/pokemon-showdown/archive/9e317a666d9fd250f36f494778e843141f09bdba.tar.gz",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -33,6 +35,6 @@
     "vitest": "^3.2.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   }
 }

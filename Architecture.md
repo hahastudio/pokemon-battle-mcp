@@ -54,10 +54,13 @@ Non-HP   = floor(Base + 20.5 + SP) * Nature
 
 - Runtime: Node.js + TypeScript ESM.
 - MCP SDK: `@modelcontextprotocol/sdk`.
-- Damage/stat engine: `@smogon/calc/adaptable` with `@pkmn/data` as the data source.
+- Damage/stat engine: `@smogon/calc/adaptable` with `@pkmn/data` wrapping a pinned
+  Pokémon Showdown Champions dex as the data source.
   - `@pkmn/dmg` is not used because it is not published on npm.
-  - `@pkmn/data` is used as the data source to provide the latest Pokémon Showdown data.
-  - `@pkmn/dex` is installed as the underlying data provider for `@pkmn/data`.
+  - `pokemon-showdown` is pinned to a verified Git commit because its npm releases and
+    generated `@pkmn/dex` snapshots can lag behind live Pokémon Champions updates.
+  - `src/data/champions-dex.ts` adapts Showdown's `Pokedex`/`TypeChart` table names to
+    the `Species`/`Types` names expected by `@pkmn/data`, preserving the Champions mod.
 - HTTP/live data: `axios`.
 - Tool schema validation: `zod`.
 - Build: `tsup` (esbuild-powered) bundles `src/index.ts` into a single executable `dist/index.js`, which lets source files use extensionless relative imports (`moduleResolution: "Bundler"` in `tsconfig.json`) while still producing a runnable Node ESM entry point. `tsc --noEmit` remains the type checker.
@@ -147,7 +150,7 @@ If live fetch/parsing fails, the server falls back to a small bundled seed so to
 
 All tools share one name resolver (`src/utils/pokemon-name.ts`) that bridges the two naming conventions in play:
 
-- Showdown data (`@pkmn/dex`, used by the calc tools): abbreviated formes such as `Basculegion-F`, `Landorus-Therian`, plus Showdown aliases (`lando-t`).
+- Showdown Champions data (used by the calc tools): abbreviated formes such as `Basculegion-F`, `Landorus-Therian`, plus Showdown aliases (`lando-t`).
 - Pikalytics (used by the meta tools): URL slugs compatible with PokeAPI-style full-word formes such as `basculegion-female`, while some pages also accept abbreviated formes such as `basculegion-f`.
 
 Any common spelling is accepted everywhere. The resolver canonicalizes through the Showdown dex (expanding/abbreviating gender suffixes as needed) and converts deterministically to provider slugs (`Basculegion-F` <-> `basculegion-female`; `Basculegion-Male` -> `basculegion`, since male is the base forme). Calc tools report material renames as `speciesNameNormalized` input corrections; unknown names raise errors with did-you-mean suggestions drawn from the dex and the current meta snapshot.
@@ -473,7 +476,8 @@ type GetSpeedTiersResponse = {
 
 ### 7.1 Damage/stat engine
 
-`src/utils/calc.ts` wraps `@smogon/calc/adaptable` with `@pkmn/data` (backed by `@pkmn/dex`) as the data layer:
+`src/utils/calc.ts` wraps `@smogon/calc/adaptable` with `@pkmn/data` backed by the
+pinned Pokémon Showdown Champions dex adapter as the data layer:
 
 - validates SP (`0..32` each, total `<=66`);
 - converts SP to EVs (`SP * 8`);
@@ -551,3 +555,18 @@ The test suite covers:
   - invalid input is rejected by schema validation.
 
 `npm test` runs `npm run typecheck` and `npm run build` first so e2e tests always start the current, type-checked `dist/index.js`.
+
+### 9.1 Updating Pokémon Showdown data
+
+The Pokémon Showdown dependency is a commit-addressed GitHub source archive. To take a
+Champions data update:
+
+1. Review upstream commits affecting `data/pokedex.ts`, `data/items.ts`, and
+   `data/mods/champions/**`.
+2. Replace the commit SHA in the `pokemon-showdown` archive URL in `package.json`.
+3. Run `npm install` to refresh `package-lock.json` and build the pinned source.
+4. Add or update a sentinel test in `tests/champions-dex.test.ts` for the changed data.
+5. Run `npm test`; merge the dependency pin and lockfile together.
+
+Do not point the dependency at a moving branch. A reviewed SHA makes each install reproducible
+and prevents unreviewed simulator changes from entering calculations.

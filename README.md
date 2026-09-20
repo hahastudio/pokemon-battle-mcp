@@ -21,6 +21,9 @@ All tools expose input/output schemas through MCP `tools/list`.
 
 ## Install / build / test
 
+Requires Node.js 22.18 or newer. Installation downloads a pinned Pokémon Showdown source
+snapshot and builds its runtime data modules locally.
+
 ```bash
 npm install
 npm run build
