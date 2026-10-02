@@ -113,19 +113,19 @@ pokemon-battle-mcp/
 The primary live provider is **Pikalytics**. Default request target:
 
 ```txt
-https://www.pikalytics.com/api/p/{YYYY-MM}/battledataregmbs3-1760
-https://www.pikalytics.com/api/p/{YYYY-MM}/battledataregmbs3-1760/garchomp
+https://www.pikalytics.com/api/p/{YYYY-MM}/gen9championsvgc2026regmc-1760
+https://www.pikalytics.com/api/p/{YYYY-MM}/gen9championsvgc2026regmc-1760/garchomp
 ```
 
 Defaults:
 
-- `format key = battledataregmbs3` (Pokémon Champions Reg M-B S3 ranked ladder)
+- `format key = gen9championsvgc2026regmc` (Pokémon Champions Reg M-C Showdown doubles ladder)
 - `rating cutoff = 1760`
 - `format = double`
 
-Pikalytics returns English-ready JSON with rank, moves, items, abilities, natures, SP spreads, teammates, counters, and tournament teams. The list endpoint returns the full ranked dataset; the Pokémon endpoint is used as a direct lookup fallback.
+Pikalytics returns English-ready JSON with rank, moves, items, abilities, natures, SP spreads, teammates, counters, and tournament teams. The list endpoint returns the full Showdown dataset; the Pokémon endpoint is used as a direct lookup fallback.
 
-The `{YYYY-MM}` data month is discovered at runtime. The service tries a preferred known-good month first, then probes recent months newest-first. Pikalytics returns the literal JSON value `false` for unavailable months, which makes this probing cheap and deterministic.
+The `{YYYY-MM}` data month is discovered at runtime. The service tries a preferred month first, then probes recent months newest-first. Pikalytics returns the literal JSON value `false` for unavailable months, which makes this probing cheap and deterministic.
 
 ### 4.2 Runtime behavior
 
@@ -134,13 +134,13 @@ Pikalytics is the only live provider. Provider selection is not configurable.
 Internal defaults:
 
 - base URL: `https://www.pikalytics.com`;
-- current format/rule: `battledataregmbs3` (kept as an internal constant and updated in code when the current regulation changes);
+- current format/rule: `gen9championsvgc2026regmc` (kept as an internal constant and updated in code when the current regulation changes);
 - rating cutoff: `1760`;
-- preferred data month: `2026-05` (tried first, with automatic recent-month probing after it);
+- preferred data month: `2026-09` (tried first, with automatic recent-month probing after it);
 - default format: `double` when a request omits `format`;
 - HTTP timeout: `8000 ms`.
 
-`format` is accepted by the request body (`single`/`double`, with `singles`/`doubles` aliases), but Pikalytics' `battledataregmbs3` source is the Champions doubles ladder, so current live meta requests use that one dataset. Season/regulation is intentionally not part of the public request schema; the service always uses the current internal provider key.
+`format` is accepted by the request body (`single`/`double`, with `singles`/`doubles` aliases), but Pikalytics' `gen9championsvgc2026regmc` source is the Champions M-C Showdown doubles ladder, so current live meta requests use that one dataset. Season/regulation is intentionally not part of the public request schema; the service always uses the current internal provider key.
 
 ### 4.3 Fallback behavior
 

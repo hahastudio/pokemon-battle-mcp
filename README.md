@@ -54,14 +54,14 @@ Example MCP client config:
 
 ## Live meta defaults
 
-The implementation uses Pikalytics English live data for the current Pokémon Champions ranked ladder. Default meta URL shape:
+The implementation uses Pikalytics English live data for Pokémon Champions Regulation M-C (Season M-6). The current provider dataset is the Showdown doubles ladder. Default meta URL shape:
 
 ```text
-https://www.pikalytics.com/api/p/2026-05/battledataregmbs3-1760
-https://www.pikalytics.com/api/p/2026-05/battledataregmbs3-1760/garchomp
+https://www.pikalytics.com/api/p/2026-09/gen9championsvgc2026regmc-1760
+https://www.pikalytics.com/api/p/2026-09/gen9championsvgc2026regmc-1760/garchomp
 ```
 
-`get_meta_snapshot` and `get_pokemon_options` accept optional `format` request fields (`single`/`double`; default `double`). Pikalytics' `battledataregmbs3` key is the Champions doubles ladder, so `format` currently does not change the queried dataset. The season/regulation key (`battledataregmbs3`) and rating cutoff (`1760`) are internal constants; update them when the live regulation changes. The data month (`YYYY-MM`) is discovered automatically — a preferred month is tried first, then recent months are probed newest-first — because Pikalytics serves the literal JSON `false` for months without data.
+`get_meta_snapshot` and `get_pokemon_options` accept optional `format` request fields (`single`/`double`; default `double`). Pikalytics' `gen9championsvgc2026regmc` key is the Champions M-C Showdown doubles ladder, so `format` currently does not change the queried dataset. The season/regulation key (`gen9championsvgc2026regmc`) and rating cutoff (`1760`) are internal constants; update them when the live regulation changes. The data month (`YYYY-MM`) is discovered automatically — a preferred month is tried first, then recent months are probed newest-first — because Pikalytics serves the literal JSON `false` for months without data.
 
 ## Pokémon name handling
 

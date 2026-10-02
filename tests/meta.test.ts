@@ -55,8 +55,8 @@ function mockPikalytics(entries: MockPikalyticsEntry[]): string[] {
   vi.mocked(axios.get).mockImplementation(async url => {
     const text = String(url);
     requestedUrls.push(text);
-    if (text.endsWith('/api/p/2026-05/battledataregmbs3-1760')) return { data: entries };
-    const slug = text.match(/\/api\/p\/2026-05\/battledataregmbs3-1760\/([^/?#]+)/)?.[1];
+    if (text.endsWith('/api/p/2026-09/gen9championsvgc2026regmc-1760')) return { data: entries };
+    const slug = text.match(/\/api\/p\/2026-09\/gen9championsvgc2026regmc-1760\/([^/?#]+)/)?.[1];
     if (slug) {
       const match = entries.find(candidate => candidate.name.toLowerCase().replace(/\s+/g, '-') === decodeURIComponent(slug).toLowerCase());
       if (match) return { data: match };

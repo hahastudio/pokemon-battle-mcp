@@ -1,13 +1,14 @@
 /**
  * Live meta data source (Architecture.md section 2.1).
  *
- * Provider: Pikalytics JSON endpoints for Pokémon Champions ranked battle data.
+ * Provider: Pikalytics JSON endpoints for Pokémon Champions Regulation M-C data.
  * Pikalytics exposes English-ready data at:
  *
  *   https://www.pikalytics.com/api/p/{YYYY-MM}/{format-rating}
  *   https://www.pikalytics.com/api/p/{YYYY-MM}/{format-rating}/{pokemon-slug}
  *
- * The current Champions doubles ladder key is `battledataregmbs3-1760`. Pikalytics returns the
+ * The current Champions M-C Showdown doubles key is `gen9championsvgc2026regmc-1760`.
+ * Pikalytics returns the
  * literal JSON value `false` for unavailable months, so this module discovers the latest available
  * month by probing a preferred month and then recent months newest-first. A bundled seed remains
  * only as an outage fallback.
@@ -105,11 +106,11 @@ type PikalyticsPokemonEntry = {
 };
 
 const PIKALYTICS_BASE_URL = 'https://www.pikalytics.com';
-const PIKALYTICS_CURRENT_FORMAT = 'battledataregmbs3';
+const PIKALYTICS_CURRENT_FORMAT = 'gen9championsvgc2026regmc';
 const PIKALYTICS_RATING = '1760';
-// The latest known Pikalytics data month at the time this provider was added. It is tried first,
+// The latest known Pikalytics data month. It is tried first,
 // then recent months are probed newest-first so this does not have to change every month.
-const PIKALYTICS_PREFERRED_DATE = '2026-05';
+const PIKALYTICS_PREFERRED_DATE = '2026-09';
 const DEFAULT_FORMAT: 'double' = 'double';
 const HTTP_TIMEOUT_MS = 8000;
 const CACHE_MS = 10 * 60 * 1000;
@@ -364,7 +365,7 @@ export async function resolvePokemonNameForCurrentMeta(
 
 async function loadMeta(request: Pick<GetMetaSnapshotRequest, 'format'> = {}): Promise<MetaCache> {
   const format = normalizeFormat(request.format ?? DEFAULT_FORMAT);
-  // Pikalytics' battledataregmbs3 key is the Champions doubles ladder. A `single` request is
+  // Pikalytics' gen9championsvgc2026regmc key is the Champions M-C Showdown doubles ladder. A `single` request is
   // currently treated as the default Champions ladder instead of attempting an unrelated BSS key.
   const cacheKeyMatches = cache?.provider === 'pikalytics' && cache.source.includes(`format=${PIKALYTICS_CURRENT_FORMAT}`);
   if (cache && cacheKeyMatches && Date.now() - cache.generatedAt < CACHE_MS) return cache;
@@ -689,7 +690,7 @@ function buildMetaNotes(args: {
     args.targetFound || args.detailFound
       ? `Using ${args.source}.`
       : `No meta entry found for ${args.requestPokemon}; tried Pikalytics slugs '${candidateSlugsForPokemon(args.effectiveName).join("', '")}'.`,
-    'Pikalytics Pokémon Champions ranked battle data is used; labels are returned in English.',
+    'Pikalytics Pokémon Champions Regulation M-C Showdown data is used; labels are returned in English.',
     'SP spreads use Pokémon Champions limits: 0-32 per stat and 66 total.',
   ];
   if (!args.targetFound && !args.detailFound && args.suggestions?.length) {
